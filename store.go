@@ -3,27 +3,33 @@ package main
 import "github.com/duo-labs/webauthn/webauthn"
 
 type InMem struct {
-	users   map[string]PasskeyUser
-	session webauthn.SessionData
+	users    map[string]PasskeyUser
+	sessions map[string]webauthn.SessionData
 
 	log Logger
 }
 
 func NewInMem(log Logger) *InMem {
 	return &InMem{
-		users: make(map[string]PasskeyUser),
-		log:   log,
+		users:    make(map[string]PasskeyUser),
+		sessions: make(map[string]webauthn.SessionData),
+		log:      log,
 	}
 }
 
-func (i *InMem) GetSession() webauthn.SessionData {
-	i.log.Printf("[DEBUG] GetSession: %v", i.session)
-	return i.session
+func (i *InMem) GetSession(token string) webauthn.SessionData {
+	i.log.Printf("[DEBUG] GetSession: %v", i.sessions[token])
+	return i.sessions[token]
 }
 
-func (i *InMem) SaveSession(data webauthn.SessionData) {
-	i.log.Printf("[DEBUG] SaveSession: %v", data)
-	i.session = data
+func (i *InMem) SaveSession(token string, data webauthn.SessionData) {
+	i.log.Printf("[DEBUG] SaveSession: %s - %v", token, data)
+	i.sessions[token] = data
+}
+
+func (i *InMem) DeleteSession(token string) {
+	i.log.Printf("[DEBUG] DeleteSession: %v", token)
+	delete(i.sessions, token)
 }
 
 func (i *InMem) GetUser(userName string) PasskeyUser {

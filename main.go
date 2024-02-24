@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/duo-labs/webauthn/webauthn"
+	"github.com/google/uuid"
 )
 
 var (
@@ -30,8 +31,9 @@ type PasskeyUser interface {
 type PasskeyStore interface {
 	GetUser(userName string) PasskeyUser
 	SaveUser(PasskeyUser)
-	GetSession() webauthn.SessionData
-	SaveSession(webauthn.SessionData)
+	GetSession(token string) webauthn.SessionData
+	SaveSession(token string, data webauthn.SessionData)
+	DeleteSession(token string)
 }
 
 func main() {
@@ -85,15 +87,17 @@ func BeginRegistration(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 	// store the sessionData values
-	datastore.SaveSession(*session)
+	t := uuid.New().String()
+	datastore.SaveSession(t, *session)
 
-	JSONResponse(w, options, http.StatusOK) // return the options generated
+	JSONResponse(w, t, options, http.StatusOK) // return the options generated
 	// options.publicKey contain our registration options
 }
 
 func FinishRegistration(w http.ResponseWriter, r *http.Request) {
+	t := r.Header.Get("Session-Key")
 	// Get the session data stored from the function above
-	session := datastore.GetSession()
+	session := datastore.GetSession(t)
 
 	// FIXME: in out example username == userID, but in real world it should be different
 	user := datastore.GetUser(string(session.UserID)) // Get the user
@@ -107,8 +111,9 @@ func FinishRegistration(w http.ResponseWriter, r *http.Request) {
 	// Pseudocode to add the user credential.
 	user.AddCredential(credential)
 	datastore.SaveUser(user)
+	datastore.DeleteSession(t)
 
-	JSONResponse(w, "Registration Success", http.StatusOK) // Handle next steps
+	JSONResponse(w, "", "Registration Success", http.StatusOK) // Handle next steps
 }
 
 func BeginLogin(w http.ResponseWriter, r *http.Request) {
@@ -124,16 +129,18 @@ func BeginLogin(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 
+	t := uuid.New().String()
 	// store the session values
-	datastore.SaveSession(*session)
+	datastore.SaveSession(t, *session)
 
-	JSONResponse(w, options, http.StatusOK) // return the options generated
+	JSONResponse(w, t, options, http.StatusOK) // return the options generated
 	// options.publicKey contain our registration options
 }
 
 func FinishLogin(w http.ResponseWriter, r *http.Request) {
+	t := r.Header.Get("Session-Key")
 	// Get the session data stored from the function above
-	session := datastore.GetSession()
+	session := datastore.GetSession(t)
 
 	// FIXME: in out example username == userID, but in real world it should be different
 	user := datastore.GetUser(string(session.UserID)) // Get the user
@@ -149,12 +156,14 @@ func FinishLogin(w http.ResponseWriter, r *http.Request) {
 	// Pseudocode to update the user credential.
 	user.UpdateCredential(credential)
 	datastore.SaveUser(user)
+	datastore.DeleteSession(t)
 
-	JSONResponse(w, "Login Success", http.StatusOK)
+	JSONResponse(w, "", "Login Success", http.StatusOK)
 }
 
-func JSONResponse(w http.ResponseWriter, data interface{}, status int) {
+func JSONResponse(w http.ResponseWriter, sessionKey string, data interface{}, status int) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Session-Key", sessionKey)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
 }

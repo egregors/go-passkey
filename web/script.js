@@ -39,7 +39,11 @@ async function register() {
         // Send attestationResponse back to server for verification and storage.
         const verificationResponse = await fetch('/api/passkey/registerFinish', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                // FIXME: Here I get session key from the response headers and send it back to the server
+                'Session-Key': response.headers.get('Session-Key')
+            },
             body: JSON.stringify(attestationResponse)
         });
 
@@ -81,7 +85,10 @@ async function login() {
         // Send assertionResponse back to server for verification.
         const verificationResponse = await fetch('/api/passkey/loginFinish', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'Session-Key': response.headers.get('Session-Key'),
+            },
             body: JSON.stringify(assertionResponse)
         });
 
