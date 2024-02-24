@@ -1,6 +1,6 @@
 package main
 
-import "github.com/duo-labs/webauthn/webauthn"
+import "github.com/go-webauthn/webauthn/webauthn"
 
 type User struct {
 	ID          []byte

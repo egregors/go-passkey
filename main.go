@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/duo-labs/webauthn/webauthn"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/google/uuid"
 )
 
@@ -40,14 +40,16 @@ type PasskeyStore interface {
 func main() {
 	l = log.Default()
 
-	host := getEnv("HOST", "http://localhost")
+	proto := getEnv("PROTOCOL", "http")
+	host := getEnv("HOST", "localhost")
 	port := getEnv("PORT", ":8080")
+	origin := fmt.Sprintf("%s://%s%s", proto, host, port)
 
 	l.Printf("[INFO] make webauthn config")
 	wconfig := &webauthn.Config{
-		RPDisplayName: "Go Webauthn",     // Display Name for your site
-		RPID:          "PassKey Example", // Generally the FQDN for your site
-		RPOrigin:      host,              // The origin URLs allowed for WebAuthn requests
+		RPDisplayName: "Go Webauthn",    // Display Name for your site
+		RPID:          host,             // Generally the FQDN for your site
+		RPOrigins:     []string{origin}, // The origin URLs allowed for WebAuthn
 	}
 
 	l.Printf("[INFO] create webauthn")
@@ -70,7 +72,7 @@ func main() {
 	http.HandleFunc("/api/passkey/loginFinish", FinishLogin)
 
 	// Start the server
-	l.Printf("[INFO] start server at %s%s", host, port)
+	l.Printf("[INFO] start server at %s", origin)
 	if err := http.ListenAndServe(port, nil); err != nil {
 		fmt.Println(err)
 	}
@@ -115,8 +117,11 @@ func FinishRegistration(w http.ResponseWriter, r *http.Request) {
 
 	credential, err := webAuthn.FinishRegistration(user, session, r)
 	if err != nil {
-		l.Printf("[ERRO] can't finish registration %s", err.Error())
-		panic(err)
+		msg := fmt.Sprintf("can't finish registration: %s", err.Error())
+		l.Printf("[ERRO] %s", msg)
+		JSONResponse(w, "", msg, http.StatusBadRequest)
+
+		return
 	}
 
 	// If creation was successful, store the credential object
