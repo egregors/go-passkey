@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/duo-labs/webauthn/webauthn"
 	"github.com/google/uuid"
@@ -39,86 +40,101 @@ type PasskeyStore interface {
 func main() {
 	l = log.Default()
 
+	host := getEnv("HOST", "http://localhost")
+	port := getEnv("PORT", ":8080")
+
 	l.Printf("[INFO] make webauthn config")
 	wconfig := &webauthn.Config{
-		RPDisplayName: "Go Webauthn",      // Display Name for your site
-		RPID:          "localhost",        // Generally the FQDN for your site
-		RPOrigin:      "http://localhost", // The origin URLs allowed for WebAuthn requests
+		RPDisplayName: "Go Webauthn",     // Display Name for your site
+		RPID:          "PassKey Example", // Generally the FQDN for your site
+		RPOrigin:      host,              // The origin URLs allowed for WebAuthn requests
 	}
 
 	l.Printf("[INFO] create webauthn")
 	if webAuthn, err = webauthn.New(wconfig); err != nil {
 		fmt.Printf("[FATA] %s", err.Error())
+		os.Exit(1)
 	}
 
 	l.Printf("[INFO] create datastore")
 	datastore = NewInMem(l)
 
 	l.Printf("[INFO] register routes")
-	// add index
+	// Serve the web files
 	http.Handle("/", http.FileServer(http.Dir("./web")))
 
-	// add auth the routes
+	// Add auth the routes
 	http.HandleFunc("/api/passkey/registerStart", BeginRegistration)
 	http.HandleFunc("/api/passkey/registerFinish", FinishRegistration)
 	http.HandleFunc("/api/passkey/loginStart", BeginLogin)
 	http.HandleFunc("/api/passkey/loginFinish", FinishLogin)
 
-	// add the static files
-	http.Handle("/static", http.FileServer(http.Dir("./static")))
-
-	// start the server
-	l.Printf("[INFO] start server at http://localhost:80/")
-	if err := http.ListenAndServe(":80", nil); err != nil {
+	// Start the server
+	l.Printf("[INFO] start server at %s%s", host, port)
+	if err := http.ListenAndServe(port, nil); err != nil {
 		fmt.Println(err)
 	}
 }
 
 func BeginRegistration(w http.ResponseWriter, r *http.Request) {
+	l.Printf("[INFO] begin registration ----------------------\\")
+
 	username, err := getUsername(r)
 	if err != nil {
+		l.Printf("[ERRO] can't get user name: %s", err.Error())
 		panic(err)
 	}
 
 	user := datastore.GetUser(username) // Find or create the new user
+
 	options, session, err := webAuthn.BeginRegistration(user)
-	// handle errors if present
 	if err != nil {
-		panic(err)
+		msg := fmt.Sprintf("can't begin registration: %s", err.Error())
+		l.Printf("[ERRO] %s", msg)
+		JSONResponse(w, "", msg, http.StatusBadRequest)
+
+		return
 	}
-	// store the sessionData values
+
+	// Make a session key and store the sessionData values
 	t := uuid.New().String()
 	datastore.SaveSession(t, *session)
 
-	JSONResponse(w, t, options, http.StatusOK) // return the options generated
+	JSONResponse(w, t, options, http.StatusOK) // return the options generated with the session key
 	// options.publicKey contain our registration options
 }
 
 func FinishRegistration(w http.ResponseWriter, r *http.Request) {
+	// Get the session key from the header
 	t := r.Header.Get("Session-Key")
 	// Get the session data stored from the function above
-	session := datastore.GetSession(t)
+	session := datastore.GetSession(t) // FIXME: cover invalid session
 
-	// FIXME: in out example username == userID, but in real world it should be different
+	// In out example username == userID, but in real world it should be different
 	user := datastore.GetUser(string(session.UserID)) // Get the user
 
 	credential, err := webAuthn.FinishRegistration(user, session, r)
 	if err != nil {
+		l.Printf("[ERRO] can't finish registration %s", err.Error())
 		panic(err)
 	}
 
 	// If creation was successful, store the credential object
-	// Pseudocode to add the user credential.
 	user.AddCredential(credential)
 	datastore.SaveUser(user)
+	// Delete the session data
 	datastore.DeleteSession(t)
 
+	l.Printf("[INFO] finish registration ----------------------/")
 	JSONResponse(w, "", "Registration Success", http.StatusOK) // Handle next steps
 }
 
 func BeginLogin(w http.ResponseWriter, r *http.Request) {
+	l.Printf("[INFO] begin login ----------------------\\")
+
 	username, err := getUsername(r)
 	if err != nil {
+		l.Printf("[ERRO]can't get user name: %s", err.Error())
 		panic(err)
 	}
 
@@ -126,41 +142,53 @@ func BeginLogin(w http.ResponseWriter, r *http.Request) {
 
 	options, session, err := webAuthn.BeginLogin(user)
 	if err != nil {
-		panic(err)
+		msg := fmt.Sprintf("can't begin login: %s", err.Error())
+		l.Printf("[ERRO] %s", msg)
+		JSONResponse(w, "", msg, http.StatusBadRequest)
+
+		return
 	}
 
+	// Make a session key and store the sessionData values
 	t := uuid.New().String()
-	// store the session values
 	datastore.SaveSession(t, *session)
 
-	JSONResponse(w, t, options, http.StatusOK) // return the options generated
+	JSONResponse(w, t, options, http.StatusOK) // return the options generated with the session key
 	// options.publicKey contain our registration options
 }
 
 func FinishLogin(w http.ResponseWriter, r *http.Request) {
+	// Get the session key from the header
 	t := r.Header.Get("Session-Key")
 	// Get the session data stored from the function above
-	session := datastore.GetSession(t)
+	session := datastore.GetSession(t) // FIXME: cover invalid session
 
-	// FIXME: in out example username == userID, but in real world it should be different
+	// In out example username == userID, but in real world it should be different
 	user := datastore.GetUser(string(session.UserID)) // Get the user
 
 	credential, err := webAuthn.FinishLogin(user, session, r)
 	if err != nil {
+		l.Printf("[ERRO] can't finish login %s", err.Error())
 		panic(err)
 	}
 
 	// Handle credential.Authenticator.CloneWarning
+	if credential.Authenticator.CloneWarning {
+		l.Printf("[WARN] can't finish login: %s", "CloneWarning")
+	}
 
 	// If login was successful, update the credential object
 	// Pseudocode to update the user credential.
 	user.UpdateCredential(credential)
 	datastore.SaveUser(user)
+	// Delete the session data
 	datastore.DeleteSession(t)
 
+	l.Printf("[INFO] finish login ----------------------/")
 	JSONResponse(w, "", "Login Success", http.StatusOK)
 }
 
+// JSONResponse is a helper function to send json response
 func JSONResponse(w http.ResponseWriter, sessionKey string, data interface{}, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Session-Key", sessionKey)
@@ -179,4 +207,13 @@ func getUsername(r *http.Request) (string, error) {
 	}
 
 	return u.Username, nil
+}
+
+// getEnv is a helper function to get the environment variable
+func getEnv(key, def string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+
+	return def
 }

@@ -22,7 +22,8 @@ async function register() {
 
         // Check if the registration options are ok.
         if (!response.ok) {
-            throw new Error('User already exists or failed to get registration options from server');
+            const msg = await response.json();
+            throw new Error('User already exists or failed to get registration options from server: ' + msg);
         }
 
         // Convert the registration options to JSON.
@@ -31,9 +32,6 @@ async function register() {
 
         // This triggers the browser to display the passkey / WebAuthn modal (e.g. Face ID, Touch ID, Windows Hello).
         // A new attestation is created. This also means a new public-private-key pair is created.
-
-        // FIXME: I changed options -> options.publicKey, because the options object was not recognized
-        //  as a valid argument for startRegistration
         const attestationResponse = await SimpleWebAuthnBrowser.startRegistration(options.publicKey);
 
         // Send attestationResponse back to server for verification and storage.
@@ -47,10 +45,12 @@ async function register() {
             body: JSON.stringify(attestationResponse)
         });
 
+
+        const msg = await verificationResponse.json();
         if (verificationResponse.ok) {
-            showMessage('Registration successful');
+            showMessage(msg, false);
         } else {
-            showMessage('Registration failed', true);
+            showMessage(msg, true);
         }
     } catch
         (error) {
@@ -70,7 +70,8 @@ async function login() {
         });
         // Check if the login options are ok.
         if (!response.ok) {
-            throw new Error('Failed to get login options from server');
+            const msg = await response.json();
+            throw new Error('Failed to get login options from server: ' + msg);
         }
         // Convert the login options to JSON.
         const options = await response.json();
@@ -78,8 +79,6 @@ async function login() {
 
         // This triggers the browser to display the passkey / WebAuthn modal (e.g. Face ID, Touch ID, Windows Hello).
         // A new assertionResponse is created. This also means that the challenge has been signed.
-
-        // FIXME: I changed options -> options.publicKey, because the options object was not recognized
         const assertionResponse = await SimpleWebAuthnBrowser.startAuthentication(options.publicKey);
 
         // Send assertionResponse back to server for verification.
@@ -92,10 +91,11 @@ async function login() {
             body: JSON.stringify(assertionResponse)
         });
 
+        const msg = await verificationResponse.json();
         if (verificationResponse.ok) {
-            showMessage('Login successful');
+            showMessage(msg, false);
         } else {
-            showMessage('Login failed', true);
+            showMessage(msg, true);
         }
     } catch (error) {
         showMessage('Error: ' + error.message, true);
