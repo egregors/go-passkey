@@ -39,7 +39,6 @@ async function register() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                // FIXME: Here I get session key from the response headers and send it back to the server
                 'Session-Key': response.headers.get('Session-Key')
             },
             body: JSON.stringify(attestationResponse)

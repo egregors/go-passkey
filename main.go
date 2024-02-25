@@ -40,7 +40,7 @@ type PasskeyStore interface {
 func main() {
 	l = log.Default()
 
-	proto := getEnv("PROTOCOL", "http")
+	proto := getEnv("PROTO", "http")
 	host := getEnv("HOST", "localhost")
 	port := getEnv("PORT", ":8080")
 	origin := fmt.Sprintf("%s://%s%s", proto, host, port)
@@ -183,7 +183,6 @@ func FinishLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If login was successful, update the credential object
-	// Pseudocode to update the user credential.
 	user.UpdateCredential(credential)
 	datastore.SaveUser(user)
 	// Delete the session data
