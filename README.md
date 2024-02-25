@@ -1,7 +1,7 @@
 # Go WebAuthn/Passkey Example
 
 This is a simple example of WebAuthn and Passkey authentication using Go and JavaScript
-from my blog post [WebAuthn and Passkey Authentication with Go](TODO: put link).
+from my blog post [PassKey in Go](https://dev.to/egregors/passkey-in-go-1efk).
 
 ## Demo
 
