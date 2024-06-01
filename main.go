@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-webauthn/webauthn/webauthn"
 )
@@ -33,7 +34,7 @@ type PasskeyStore interface {
 	GetOrCreateUser(userName string) PasskeyUser
 	SaveUser(PasskeyUser)
 	GenSessionID() (string, error)
-	GetSession(token string) webauthn.SessionData
+	GetSession(token string) (webauthn.SessionData, bool)
 	SaveSession(token string, data webauthn.SessionData)
 	DeleteSession(token string)
 }
@@ -71,6 +72,8 @@ func main() {
 	http.HandleFunc("/api/passkey/registerFinish", FinishRegistration)
 	http.HandleFunc("/api/passkey/loginStart", BeginLogin)
 	http.HandleFunc("/api/passkey/loginFinish", FinishLogin)
+
+	http.Handle("/private", LoggedInMiddleware(http.HandlerFunc(PrivatePage)))
 
 	// Start the server
 	l.Printf("[INFO] start server at %s", origin)
@@ -136,7 +139,7 @@ func FinishRegistration(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get the session data stored from the function above
-	session := datastore.GetSession(sid.Value) // FIXME: cover invalid session
+	session, _ := datastore.GetSession(sid.Value) // FIXME: cover invalid session
 
 	// In out example username == userID, but in real world it should be different
 	user := datastore.GetOrCreateUser(string(session.UserID)) // Get the user
@@ -221,7 +224,7 @@ func FinishLogin(w http.ResponseWriter, r *http.Request) {
 		panic(err) // FIXME: handle error
 	}
 	// Get the session data stored from the function above
-	session := datastore.GetSession(sid.Value) // FIXME: cover invalid session
+	session, _ := datastore.GetSession(sid.Value) // FIXME: cover invalid session
 
 	// In out example username == userID, but in real world it should be different
 	user := datastore.GetOrCreateUser(string(session.UserID)) // Get the user
@@ -241,8 +244,41 @@ func FinishLogin(w http.ResponseWriter, r *http.Request) {
 	user.UpdateCredential(credential)
 	datastore.SaveUser(user)
 
+	// Delete the login session data
+	datastore.DeleteSession(sid.Value)
+	http.SetCookie(w, &http.Cookie{
+		Name:  "sid",
+		Value: "",
+	})
+
+	// Add the new session cookie
+	t, err := datastore.GenSessionID()
+	if err != nil {
+		l.Printf("[ERRO] can't generate session id: %s", err.Error())
+
+		panic(err) // TODO: handle error
+	}
+
+	datastore.SaveSession(t, webauthn.SessionData{
+		Expires: time.Now().Add(time.Hour),
+	})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "sid",
+		Value:    t,
+		Path:     "/",
+		MaxAge:   3600,
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, // TODO: SameSiteStrictMode maybe?
+	})
+
 	l.Printf("[INFO] finish login ----------------------/")
 	JSONResponse(w, "Login Success", http.StatusOK)
+}
+
+func PrivatePage(w http.ResponseWriter, r *http.Request) {
+	// just show "Hello, World!" for now
+	_, _ = w.Write([]byte("Hello, World!"))
 }
 
 // JSONResponse is a helper function to send json response
@@ -272,4 +308,32 @@ func getEnv(key, def string) string {
 	}
 
 	return def
+}
+
+func LoggedInMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// TODO: url to redirect to should be passed as a parameter
+
+		sid, err := r.Cookie("sid")
+		if err != nil {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+
+			return
+		}
+
+		session, ok := datastore.GetSession(sid.Value)
+		if !ok {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+
+			return
+		}
+
+		if session.Expires.Before(time.Now()) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

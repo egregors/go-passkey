@@ -8,6 +8,8 @@ import (
 )
 
 type InMem struct {
+	// TODO: it would be nice to have a mutex here
+	// TODO: use pointers to avoid copying
 	users    map[string]PasskeyUser
 	sessions map[string]webauthn.SessionData
 
@@ -33,9 +35,11 @@ func NewInMem(log Logger) *InMem {
 	}
 }
 
-func (i *InMem) GetSession(token string) webauthn.SessionData {
+func (i *InMem) GetSession(token string) (webauthn.SessionData, bool) {
 	i.log.Printf("[DEBUG] GetSession: %v", i.sessions[token])
-	return i.sessions[token]
+	val, ok := i.sessions[token]
+
+	return val, ok
 }
 
 func (i *InMem) SaveSession(token string, data webauthn.SessionData) {
