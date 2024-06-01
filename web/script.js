@@ -18,7 +18,6 @@ async function register() {
             method: 'POST', headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({username: username})
         });
-        console.log(response)
 
         // Check if the registration options are ok.
         if (!response.ok) {
@@ -28,7 +27,6 @@ async function register() {
 
         // Convert the registration options to JSON.
         const options = await response.json();
-        console.log(options)
 
         // This triggers the browser to display the passkey / WebAuthn modal (e.g. Face ID, Touch ID, Windows Hello).
         // A new attestation is created. This also means a new public-private-key pair is created.
@@ -39,7 +37,6 @@ async function register() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Session-Key': response.headers.get('Session-Key')
             },
             body: JSON.stringify(attestationResponse)
         });
@@ -74,7 +71,6 @@ async function login() {
         }
         // Convert the login options to JSON.
         const options = await response.json();
-        console.log(options)
 
         // This triggers the browser to display the passkey / WebAuthn modal (e.g. Face ID, Touch ID, Windows Hello).
         // A new assertionResponse is created. This also means that the challenge has been signed.
@@ -85,7 +81,6 @@ async function login() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Session-Key': response.headers.get('Session-Key'),
             },
             body: JSON.stringify(assertionResponse)
         });

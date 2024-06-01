@@ -1,12 +1,28 @@
 package main
 
-import "github.com/go-webauthn/webauthn/webauthn"
+import (
+	"crypto/rand"
+	"encoding/base64"
+
+	"github.com/go-webauthn/webauthn/webauthn"
+)
 
 type InMem struct {
 	users    map[string]PasskeyUser
 	sessions map[string]webauthn.SessionData
 
 	log Logger
+}
+
+func (i *InMem) GenSessionID() (string, error) {
+	b := make([]byte, 32)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+
+	return base64.URLEncoding.EncodeToString(b), nil
+
 }
 
 func NewInMem(log Logger) *InMem {
@@ -32,10 +48,10 @@ func (i *InMem) DeleteSession(token string) {
 	delete(i.sessions, token)
 }
 
-func (i *InMem) GetUser(userName string) PasskeyUser {
-	i.log.Printf("[DEBUG] GetUser: %v", userName)
+func (i *InMem) GetOrCreateUser(userName string) PasskeyUser {
+	i.log.Printf("[DEBUG] GetOrCreateUser: %v", userName)
 	if _, ok := i.users[userName]; !ok {
-		i.log.Printf("[DEBUG] GetUser: creating new user: %v", userName)
+		i.log.Printf("[DEBUG] GetOrCreateUser: creating new user: %v", userName)
 		i.users[userName] = &User{
 			ID:          []byte(userName),
 			DisplayName: userName,

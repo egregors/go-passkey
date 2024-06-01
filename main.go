@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/google/uuid"
 )
 
 var (
@@ -16,7 +15,8 @@ var (
 	err      error
 
 	datastore PasskeyStore
-	l         Logger
+	//sessions  SessionStore
+	l Logger
 )
 
 type Logger interface {
@@ -30,8 +30,9 @@ type PasskeyUser interface {
 }
 
 type PasskeyStore interface {
-	GetUser(userName string) PasskeyUser
+	GetOrCreateUser(userName string) PasskeyUser
 	SaveUser(PasskeyUser)
+	GenSessionID() (string, error)
 	GetSession(token string) webauthn.SessionData
 	SaveSession(token string, data webauthn.SessionData)
 	DeleteSession(token string)
@@ -81,45 +82,75 @@ func main() {
 func BeginRegistration(w http.ResponseWriter, r *http.Request) {
 	l.Printf("[INFO] begin registration ----------------------\\")
 
+	// TODO: i don't like this, but it's a quick solution
+	//  can we actually do not use the username at all?
 	username, err := getUsername(r)
 	if err != nil {
 		l.Printf("[ERRO] can't get user name: %s", err.Error())
-		panic(err)
+
+		panic(err) // FIXME: handle error
 	}
 
-	user := datastore.GetUser(username) // Find or create the new user
+	user := datastore.GetOrCreateUser(username) // Find or create the new user
 
 	options, session, err := webAuthn.BeginRegistration(user)
 	if err != nil {
 		msg := fmt.Sprintf("can't begin registration: %s", err.Error())
 		l.Printf("[ERRO] %s", msg)
-		JSONResponse(w, "", msg, http.StatusBadRequest)
+		JSONResponse(w, msg, http.StatusBadRequest)
 
 		return
 	}
 
 	// Make a session key and store the sessionData values
-	t := uuid.New().String()
+	t, err := datastore.GenSessionID()
+	if err != nil {
+		l.Printf("[ERRO] can't generate session id: %s", err.Error())
+
+		panic(err) // FIXME: handle error
+	}
+
 	datastore.SaveSession(t, *session)
 
-	JSONResponse(w, t, options, http.StatusOK) // return the options generated with the session key
+	http.SetCookie(w, &http.Cookie{
+		Name:     "sid",
+		Value:    t,
+		Path:     "api/passkey/registerStart",
+		MaxAge:   3600,
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, // TODO: SameSiteStrictMode maybe?
+	})
+
+	JSONResponse(w, options, http.StatusOK) // return the options generated with the session key
 	// options.publicKey contain our registration options
 }
 
 func FinishRegistration(w http.ResponseWriter, r *http.Request) {
-	// Get the session key from the header
-	t := r.Header.Get("Session-Key")
+	// Get the session key from cookie
+	sid, err := r.Cookie("sid")
+	if err != nil {
+		l.Printf("[ERRO] can't get session id: %s", err.Error())
+
+		panic(err) // FIXME: handle error
+	}
+
 	// Get the session data stored from the function above
-	session := datastore.GetSession(t) // FIXME: cover invalid session
+	session := datastore.GetSession(sid.Value) // FIXME: cover invalid session
 
 	// In out example username == userID, but in real world it should be different
-	user := datastore.GetUser(string(session.UserID)) // Get the user
+	user := datastore.GetOrCreateUser(string(session.UserID)) // Get the user
 
 	credential, err := webAuthn.FinishRegistration(user, session, r)
 	if err != nil {
 		msg := fmt.Sprintf("can't finish registration: %s", err.Error())
 		l.Printf("[ERRO] %s", msg)
-		JSONResponse(w, "", msg, http.StatusBadRequest)
+		// clean up sid cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:  "sid",
+			Value: "",
+		})
+		JSONResponse(w, msg, http.StatusBadRequest)
 
 		return
 	}
@@ -128,10 +159,14 @@ func FinishRegistration(w http.ResponseWriter, r *http.Request) {
 	user.AddCredential(credential)
 	datastore.SaveUser(user)
 	// Delete the session data
-	datastore.DeleteSession(t)
+	datastore.DeleteSession(sid.Value)
+	http.SetCookie(w, &http.Cookie{
+		Name:  "sid",
+		Value: "",
+	})
 
 	l.Printf("[INFO] finish registration ----------------------/")
-	JSONResponse(w, "", "Registration Success", http.StatusOK) // Handle next steps
+	JSONResponse(w, "Registration Success", http.StatusOK) // Handle next steps
 }
 
 func BeginLogin(w http.ResponseWriter, r *http.Request) {
@@ -143,37 +178,57 @@ func BeginLogin(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 
-	user := datastore.GetUser(username) // Find the user
+	user := datastore.GetOrCreateUser(username) // Find the user
 
 	options, session, err := webAuthn.BeginLogin(user)
 	if err != nil {
 		msg := fmt.Sprintf("can't begin login: %s", err.Error())
 		l.Printf("[ERRO] %s", msg)
-		JSONResponse(w, "", msg, http.StatusBadRequest)
+		JSONResponse(w, msg, http.StatusBadRequest)
 
 		return
 	}
 
 	// Make a session key and store the sessionData values
-	t := uuid.New().String()
+	t, err := datastore.GenSessionID()
+	if err != nil {
+		l.Printf("[ERRO] can't generate session id: %s", err.Error())
+
+		panic(err) // TODO: handle error
+	}
 	datastore.SaveSession(t, *session)
 
-	JSONResponse(w, t, options, http.StatusOK) // return the options generated with the session key
+	http.SetCookie(w, &http.Cookie{
+		Name:     "sid",
+		Value:    t,
+		Path:     "api/passkey/loginStart",
+		MaxAge:   3600,
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, // TODO: SameSiteStrictMode maybe?
+	})
+
+	JSONResponse(w, options, http.StatusOK) // return the options generated with the session key
 	// options.publicKey contain our registration options
 }
 
 func FinishLogin(w http.ResponseWriter, r *http.Request) {
-	// Get the session key from the header
-	t := r.Header.Get("Session-Key")
+	// Get the session key from cookie
+	sid, err := r.Cookie("sid")
+	if err != nil {
+		l.Printf("[ERRO] can't get session id: %s", err.Error())
+
+		panic(err) // FIXME: handle error
+	}
 	// Get the session data stored from the function above
-	session := datastore.GetSession(t) // FIXME: cover invalid session
+	session := datastore.GetSession(sid.Value) // FIXME: cover invalid session
 
 	// In out example username == userID, but in real world it should be different
-	user := datastore.GetUser(string(session.UserID)) // Get the user
+	user := datastore.GetOrCreateUser(string(session.UserID)) // Get the user
 
 	credential, err := webAuthn.FinishLogin(user, session, r)
 	if err != nil {
-		l.Printf("[ERRO] can't finish login %s", err.Error())
+		l.Printf("[ERRO] can't finish login: %s", err.Error())
 		panic(err)
 	}
 
@@ -185,17 +240,14 @@ func FinishLogin(w http.ResponseWriter, r *http.Request) {
 	// If login was successful, update the credential object
 	user.UpdateCredential(credential)
 	datastore.SaveUser(user)
-	// Delete the session data
-	datastore.DeleteSession(t)
 
 	l.Printf("[INFO] finish login ----------------------/")
-	JSONResponse(w, "", "Login Success", http.StatusOK)
+	JSONResponse(w, "Login Success", http.StatusOK)
 }
 
 // JSONResponse is a helper function to send json response
-func JSONResponse(w http.ResponseWriter, sessionKey string, data interface{}, status int) {
+func JSONResponse(w http.ResponseWriter, data interface{}, status int) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Session-Key", sessionKey)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
 }
